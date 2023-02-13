@@ -1,0 +1,27 @@
+---
+- name: Job creation for GitHub SCM
+  jenkins_script:
+    script: |
+      import hudson.plugins.git.*;
+      import hudson.triggers.Trigger;
+      import com.cloudbees.jenkins.GitHubPushTrigger;
+      def scm = new GitSCM('${git_repo}')
+      scm.userRemoteConfigs[0].credentialsId = '${jenkins_git_cred_id}'
+      scm.branches = [new BranchSpec("*/main")];
+      def parent = Jenkins.instance
+      def job = new org.jenkinsci.plugins.workflow.job.WorkflowJob(parent, '${job_name}')
+      def flowDefinition = new org.jenkinsci.plugins.workflow.cps.CpsScmFlowDefinition(scm, '${jenkins_file}')
+      job.definition = flowDefinition
+      job.scheduleBuild2(0)
+      gitTrigger = new GitHubPushTrigger();
+      job.addTrigger(gitTrigger);
+      gitTrigger.start(job, true);
+      parent.reload()
+    args:
+     jenkins_git_cred_id: "{{ jenkins_git_cred_id }}"
+     git_repo: "{{ git_repo }}"
+     jenkins_file: "{{ jenkins_file }}"
+     job_name: "{{ job_name }}"
+    user: "{{ jenkins_user }}"
+    password: "{{ jenkins_pwd }}"
+  become: true

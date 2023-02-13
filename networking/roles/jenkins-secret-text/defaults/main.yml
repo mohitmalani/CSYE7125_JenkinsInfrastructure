@@ -1,0 +1,5 @@
+---
+jenkins_user: "admin"
+jenkins_pwd: ""
+secret_name: ""
+secret_text: ""

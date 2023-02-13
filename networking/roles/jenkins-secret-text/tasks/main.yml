@@ -1,0 +1,28 @@
+---
+- name: Secret creation
+  jenkins_script:
+    script: |  
+      import jenkins.model.Jenkins
+      import com.cloudbees.plugins.credentials.domains.Domain
+      import org.jenkinsci.plugins.plaincredentials.impl.StringCredentialsImpl
+      import com.cloudbees.plugins.credentials.CredentialsScope
+      import hudson.util.Secret
+
+      instance = Jenkins.instance
+      domain = Domain.global()
+      store = instance.getExtensionList("com.cloudbees.plugins.credentials.SystemCredentialsProvider")[0].getStore()
+
+      secretText = new StringCredentialsImpl(
+        CredentialsScope.GLOBAL,
+        '${secret_name}',
+        "",
+        Secret.fromString('${secret_text}')
+      )
+
+      store.addCredentials(domain, secretText)
+    args:
+     secret_name: "{{ secret_name }}"
+     secret_text: "{{ secret_text }}"
+    user: "{{ jenkins_user }}"
+    password: "{{ jenkins_pwd }}"
+  become: true

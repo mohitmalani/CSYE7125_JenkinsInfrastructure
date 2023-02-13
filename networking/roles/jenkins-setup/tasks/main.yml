@@ -1,0 +1,305 @@
+---
+- name: Copy the config file to required location
+  copy:
+    src: domainConfigFile
+    dest: "/etc/nginx/sites-available/domainConfigFile"
+    owner: root
+    group: root
+    mode: 0644
+  become: true
+
+- name: Linking subdomain with jenkins and printing Jenkins password
+  shell: |
+    sudo apt-get update
+    if [ -f "/etc/nginx/sites-available/domainConfigFile" ]
+    then
+      sudo sed -i 's/your_domain/{{ sub_domain }}/g' /etc/nginx/sites-available/domainConfigFile
+      sudo mv /etc/nginx/sites-available/domainConfigFile /etc/nginx/sites-available/{{ sub_domain }}
+      sudo ln -s /etc/nginx/sites-available/{{ sub_domain }} /etc/nginx/sites-enabled/
+    else
+      echo "File is not present.. looks like its already renamed and linked"
+    fi
+    . /etc/profile.d/maven.sh
+    sudo cat /var/lib/jenkins/secrets/initialAdminPassword
+  register: cmd_output
+  changed_when: cmd_output.rc != 0
+
+- name: Read admin pwd
+  command: sudo cat /var/lib/jenkins/secrets/initialAdminPassword
+  register: adminpwd
+  changed_when: adminpwd.rc != 0
+
+- name: Debug command output
+  debug:
+    msg: "{{ adminpwd.stdout }}"
+
+- name: Test Nginx
+  command: nginx -t
+  register: nginx_output # <- Registers the command output.
+  changed_when: nginx_output.rc != 0 # <- Uses the return code to define when the task has changed.
+  become: true
+
+- name: Reload Nginx
+  service:
+    name: nginx
+    state: reloaded
+  become: true
+
+- name: Use Certbot to generate certificates
+  command: certbot --nginx -n -d "{{ sub_domain }}" --email "{{ email }}" --agree-tos --redirect
+  register: nginx_output # <- Registers the command output.
+  changed_when: nginx_output.rc != 0 # <- Uses the return code to define when the task has changed.
+  become: true
+
+- name: unlock and add admin user
+  jenkins_script:
+   script: |
+    import jenkins.model.*
+    import hudson.security.*
+    def instance = Jenkins.getInstance()
+    def hudsonRealm = new HudsonPrivateSecurityRealm(false)
+    hudsonRealm.createAccount('${user_name}', '${user_pwd}')
+    instance.setSecurityRealm(hudsonRealm)
+    def strategy = new FullControlOnceLoggedInAuthorizationStrategy()
+    strategy.setAllowAnonymousRead(false)
+    instance.setAuthorizationStrategy(strategy)
+    instance.save()
+   args:
+    user_name: "{{ admin_user_name }}"
+    user_pwd: "{{ admin_user_pass }}"
+   user: admin
+   password: "{{ adminpwd.stdout }}"
+  become: true
+
+- name: Complete setup wizard
+  jenkins_script:
+   script: |
+    import static jenkins.model.Jenkins.instance as jenkins
+    import jenkins.install.InstallState
+    if (!jenkins.installState.isSetupComplete()) {
+      InstallState.INITIAL_SETUP_COMPLETED.initializeState()
+    }
+   user: admin
+   password: "{{ adminpwd.stdout }}"
+  become: true
+
+- name: Install plugins
+  jenkins_plugin:
+   name: "{{ item }}"
+   state: latest
+   url_username: admin
+   url_password: "{{ adminpwd.stdout }}"
+  with_items: "{{ jenkins_plugins }}"
+  become: true
+
+- name: Restart Jenkins
+  ansible.builtin.systemd:
+    state: restarted
+    name: jenkins
+  become: true
+
+- name: Get the newly installed jenkins plugins
+  jenkins_script:
+    script: "println(Jenkins.instance.pluginManager.plugins)"
+    user: admin
+    password: "{{ adminpwd.stdout }}"
+  become: true
+
+- name: Node JS global config on Jenkins
+  jenkins_script:
+    script: |
+      import hudson.model.*
+      import hudson.tools.*
+      import jenkins.plugins.nodejs.tools.*
+      import jenkins.model.*
+
+      def inst = Jenkins.getInstance()
+      def desc = inst.getDescriptor("jenkins.plugins.nodejs.tools.NodeJSInstallation")
+
+      def installer = new NodeJSInstaller("19.0.0", "", 100)
+      def installerProps = new InstallSourceProperty([installer])
+      def installation = new NodeJSInstallation("node", "", [installerProps])
+
+      desc.setInstallations(installation)
+      desc.save()
+    user: admin
+    password: "{{ adminpwd.stdout }}"
+  become: true
+
+- name: Docker global config on Jenkins
+  jenkins_script:
+    script: |
+      import jenkins.model.*
+      import hudson.plugins.*
+      import hudson.plugins.docker.*
+      import hudson.plugins.docker.model.*
+
+      def instance = Jenkins.getInstance()
+
+      def dockerTool = Jenkins.instance.getExtensionList(org.jenkinsci.plugins.docker.commons.tools.DockerTool.DescriptorImpl.class)[0]
+      dockerTool.setInstallations(new org.jenkinsci.plugins.docker.commons.tools.DockerTool("Docker", "/usr", []))
+      dockerTool.save()
+    user: admin
+    password: "{{ adminpwd.stdout }}"
+  become: true
+
+- name: Create GitHub token Secret
+  include_role:
+    name: jenkins-secret-text
+  vars:
+    jenkins_user: "admin"
+    jenkins_pwd: "{{ adminpwd.stdout }}"
+    secret_name: "GH_TOKEN"
+    secret_text: "{{ gh_token }}"
+
+- name: Github Token Cred creation
+  include_role:
+    name: jenkins-credentials-creation
+  vars:
+    jenkins_user: "admin"
+    jenkins_pwd: "{{ adminpwd.stdout }}"
+    cred_id: "gitToken"
+    user_name: "token"
+    user_pwd: "{{ gh_token }}"
+
+- name: Helm Chart Release Job creation
+  include_role:
+    name: jenkins-job-creation
+  vars:
+    jenkins_user: "admin"
+    jenkins_pwd: "{{ adminpwd.stdout }}"
+    jenkins_git_cred_id: "gitToken"
+    git_repo: "{{ git_repo_helm_chart }}"
+    jenkins_file: "{{ jenkins_file_helm_chart }}"
+    job_name: "Helm Chart Release"
+
+- name: Docker Cred creation
+  include_role:
+    name: jenkins-credentials-creation
+  vars:
+    jenkins_user: "admin"
+    jenkins_pwd: "{{ adminpwd.stdout }}"
+    cred_id: "docker-credentials"
+    user_name: "{{ docker_user }}"
+    user_pwd: "{{ docker_pwd }}"
+
+- name: Create AWS ACCESS KEY ID Secret
+  include_role:
+    name: jenkins-secret-text
+  vars:
+    jenkins_user: "admin"
+    jenkins_pwd: "{{ adminpwd.stdout }}"
+    secret_name: "jenkins-aws-key-id"
+    secret_text: "{{ jenkins_aws_key_id }}"
+
+- name: Create AWS SECRET ACCESS KEY Secret
+  include_role:
+    name: jenkins-secret-text
+  vars:
+    jenkins_user: "admin"
+    jenkins_pwd: "{{ adminpwd.stdout }}"
+    secret_name: "jenkins-aws-secret-key"
+    secret_text: "{{ jenkins_aws_secret_key }}"
+
+- name: Create DOCKER REPO env variable
+  include_role:
+    name: jenkins-env-variable
+  vars:
+    jenkins_user: "admin"
+    jenkins_pwd: "{{ adminpwd.stdout }}"
+    env_var_name: "DOCKER_REPO"
+    env_var_value: "{{ docker_repo }}"
+
+- name: Create CLUSTER NAME env variable
+  include_role:
+    name: jenkins-env-variable
+  vars:
+    jenkins_user: "admin"
+    jenkins_pwd: "{{ adminpwd.stdout }}"
+    env_var_name: "CLUSTER_NAME"
+    env_var_value: "{{ cluster_name }}"
+
+- name: Create AWS DEFAULT REGION env variable
+  include_role:
+    name: jenkins-env-variable
+  vars:
+    jenkins_user: "admin"
+    jenkins_pwd: "{{ adminpwd.stdout }}"
+    env_var_name: "AWS_DEFAULT_REGION"
+    env_var_value: "{{ cluster_aws_region }}"
+
+- name: Create KOPS STATE STORE env variable
+  include_role:
+    name: jenkins-env-variable
+  vars:
+    jenkins_user: "admin"
+    jenkins_pwd: "{{ adminpwd.stdout }}"
+    env_var_name: "KOPS_STATE_STORE"
+    env_var_value: "{{ kops_state_store }}"
+
+- name: Create DB HOST env variable
+  include_role:
+    name: jenkins-env-variable
+  vars:
+    jenkins_user: "admin"
+    jenkins_pwd: "{{ adminpwd.stdout }}"
+    env_var_name: "DB_HOST"
+    env_var_value: "{{ db_host }}"
+
+- name: Create DB URL env variable
+  include_role:
+    name: jenkins-env-variable
+  vars:
+    jenkins_user: "admin"
+    jenkins_pwd: "{{ adminpwd.stdout }}"
+    env_var_name: "DB_URL"
+    env_var_value: "{{ db_url }}"
+
+- name: Create DB PASSWORD Secret
+  include_role:
+    name: jenkins-secret-text
+  vars:
+    jenkins_user: "admin"
+    jenkins_pwd: "{{ adminpwd.stdout }}"
+    secret_name: "db-password"
+    secret_text: "{{ db_password }}"
+
+- name: Create GIT_HELM_REPO env variable
+  include_role:
+    name: jenkins-env-variable
+  vars:
+    jenkins_user: "admin"
+    jenkins_pwd: "{{ adminpwd.stdout }}"
+    env_var_name: "GIT_HELM_REPO"
+    env_var_value: "{{ GIT_HELM_REPO }}"
+
+- name: Todo Webapp CI-CD Job creation
+  include_role:
+    name: jenkins-job-creation
+  vars:
+    jenkins_user: "admin"
+    jenkins_pwd: "{{ adminpwd.stdout }}"
+    jenkins_git_cred_id: "gitToken"
+    git_repo: "{{ git_repo_todo_webapp }}"
+    jenkins_file: "{{ jenkins_file_todo_webapp }}"
+    job_name: "Todo Webapp CI-CD"
+
+- name: Create DOCKER REPO env variable for Kafka consumer job
+  include_role:
+    name: jenkins-env-variable
+  vars:
+    jenkins_user: "admin"
+    jenkins_pwd: "{{ adminpwd.stdout }}"
+    env_var_name: "DOCKER_ELASTIC_APP_REPO"
+    env_var_value: "{{ docker_elastic_app_repo }}"
+
+- name: Kafka Consumer Webapp CI-CD Job creation
+  include_role:
+    name: jenkins-job-creation
+  vars:
+    jenkins_user: "admin"
+    jenkins_pwd: "{{ adminpwd.stdout }}"
+    jenkins_git_cred_id: "gitToken"
+    git_repo: "{{ git_repo_elastic_webapp }}"
+    jenkins_file: "{{ jenkins_file_elastic_webapp }}"
+    job_name: "Kafka Consumer  Webapp CI-CD"

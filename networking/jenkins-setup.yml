@@ -1,0 +1,7 @@
+---
+- name: "Setup AWS Networking"
+  remote_user: ubuntu
+  hosts: ec2-group
+  gather_facts: no
+  roles:
+  - jenkins-setup

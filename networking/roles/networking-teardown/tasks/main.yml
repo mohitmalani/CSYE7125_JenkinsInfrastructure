@@ -1,0 +1,134 @@
+---
+- name: Collect EC2 Instances
+  ec2_instance_info:
+    profile: "{{ aws_profile }}"
+    region: "{{ aws_region }}"
+    filters:
+      "{{ {'tag:' + terminate_key: terminate_value} }}"
+  register: jenkins_collected_instances
+
+- name: Collect Jenkins EIP
+  ec2_eip_info:
+    profile: "{{ aws_profile }}"
+    region: "{{ aws_region }}"
+    filters:
+      "{{ {'tag:Name': eip_name} }}"
+  register: my_eip
+
+- name: Disassociate an elastic IP
+  ec2_eip:
+    state: absent
+    profile: "{{ aws_profile }}"
+    region: "{{ aws_region }}"
+    device_id: "{{ jenkins_collected_instances.instances[0].instance_id }}"
+    ip: "{{ my_eip.addresses[0].public_ip }}"
+
+- name: Terminate EC2 Instances
+  ec2_instance:
+    profile: "{{ aws_profile }}"
+    region: "{{ aws_region }}"
+    state: absent
+    instance_ids: "{{ item.instance_id }}"
+    wait: yes
+  with_items: "{{ jenkins_collected_instances.instances }}"
+
+- name: Get VPC for Jenkins
+  ec2_vpc_net:
+    state: present
+    region: "{{ aws_region }}"
+    name: "{{ vpc_name }}"
+    cidr_block: "{{ vpc_cidr }}"
+    dns_hostnames: yes
+    dns_support: yes
+    multi_ok: no
+    tenancy: default
+    profile: "{{ aws_profile }}"
+    tags:
+      Name: "jenkins"
+  register: jenkins_vpc
+
+- name: Grab the route table for Jenkins VPC
+  ec2_vpc_route_table_info:
+    profile: "{{ aws_profile }}"
+    region: "{{ aws_region }}"
+    filters:
+      vpc-id: "{{ jenkins_vpc.vpc.id }}"
+  register: jenkins_route_table
+
+# # Do not give any routes and subnets to Route table to remove the peering route
+# - name: Update the route table in the Jenkins vpc
+#   ec2_vpc_route_table:
+#     state: present
+#     lookup: id
+#     route_table_id: "{{ jenkins_route_table.route_tables[0].id }}"
+#     vpc_id: "{{ jenkins_vpc.vpc.id }}"
+#     profile: "{{ aws_profile }}"
+#     region: "{{ aws_region }}"
+#     tags:
+#       Name: "jenkins_route_table_{{ jenkins_vpc.vpc.id }}"
+#   register: jenkins_route_table_updated
+
+- name: Delete Internet Gateway
+  ec2_vpc_igw:
+    state: absent
+    profile: "{{ aws_profile }}"
+    region: "{{ aws_region }}"
+    vpc_id: "{{ jenkins_vpc.vpc.id }}"
+    tags:
+      Name: "jenkins"
+  register: jenkins_igw
+
+- name: Delete subnets
+  ec2_vpc_subnet:
+    state: absent
+    profile: "{{ aws_profile }}"
+    region: "{{ aws_region }}"
+    az: "{{ item.value.az }}"
+    vpc_id: "{{ jenkins_vpc.vpc.id }}"
+    cidr: "{{ item.value.cidr }}"
+    tags:
+      Name: "jenkins_{{ item.value.az }}"
+  with_dict: "{{ vpc_subnets }}"
+  register: jenkins_vpc_subnets
+
+- name: "Delete vpc security groups"
+  ec2_group:
+    state: absent
+    profile: "{{ aws_profile }}"
+    region: "{{ aws_region }}"
+    vpc_id: "{{ jenkins_vpc.vpc.id }}"
+    name: "jenkins_sg_{{ jenkins_vpc.vpc.id }}"
+    description: "jenkins security group for {{ jenkins_vpc.vpc.id }}"
+    rules:
+      - proto: tcp
+        from_port: 22
+        to_port: 22
+        cidr_ip: 0.0.0.0/0
+  register: jenkins_sg
+
+# - name: Delete VPC peering from Jenkins VPC to K8S cluster VPC
+#   ec2_vpc_peer:
+#     profile: "{{ aws_profile }}"
+#     region: "{{ aws_region }}"
+#     vpc_id: "{{ jenkins_vpc.vpc.id }}"
+#     peer_vpc_id: "{{ cluster_vpc_id }}"
+#     peer_owner_id: "{{ cluster_account_id }}"
+#     state: absent
+#     tags:
+#       Name: jenkins_vpc_peer_to_cluster_vpc
+#   register: vpc_peer
+
+- name: Delete VPC for Jenkins
+  ec2_vpc_net:
+    state: absent
+    region: "{{ aws_region }}"
+    name: "{{ vpc_name }}"
+    cidr_block: "{{ vpc_cidr }}"
+    dns_hostnames: yes
+    dns_support: yes
+    multi_ok: no
+    tenancy: default
+    profile: "{{ aws_profile }}"
+    tags:
+      Name: "jenkins"
+  register: jenkins_vpc

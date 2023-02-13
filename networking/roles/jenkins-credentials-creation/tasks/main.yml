@@ -1,0 +1,28 @@
+---
+- name: Jenkins Cred creation - User and Pwd
+  jenkins_script:
+    script: |  
+      import jenkins.model.Jenkins
+      import com.cloudbees.plugins.credentials.domains.Domain
+      import com.cloudbees.plugins.credentials.impl.UsernamePasswordCredentialsImpl
+      import com.cloudbees.plugins.credentials.CredentialsScope
+
+      instance = Jenkins.instance
+      domain = Domain.global()
+      store = instance.getExtensionList("com.cloudbees.plugins.credentials.SystemCredentialsProvider")[0].getStore()
+
+      usernameAndPassword = new UsernamePasswordCredentialsImpl(
+      CredentialsScope.GLOBAL,
+      "${cred_id}",
+      "",
+      '${user_name}',
+      '${user_pwd}'
+      )
+      store.addCredentials(domain, usernameAndPassword)
+    args:
+     cred_id: "{{ cred_id }}"
+     user_name: "{{ user_name }}"
+     user_pwd: "{{ user_pwd }}"
+    user: "{{ jenkins_user }}"
+    password: "{{ jenkins_pwd }}"
+  become: true

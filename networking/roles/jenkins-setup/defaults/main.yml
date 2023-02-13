@@ -1,0 +1,73 @@
+---
+sub_domain: ""
+email: ""
+admin_user_name: jenkins
+admin_user_pass: hudson
+env_var_name: GH_TOKEN
+gh_token: ""
+git_repo_helm_chart: "https://github.com/cyse7125-fall2022-group04/helm-chart.git"
+jenkins_file_helm_chart: "Jenkinsfile"
+docker_user: ""
+docker_pwd: ""
+jenkins_aws_key_id: ""
+jenkins_aws_secret_key: ""
+docker_repo: "csye7125group04/webapp"
+cluster_aws_region: "us-east-1"
+kops_state_store: ""
+cluster_name: ""
+db_host: ""
+db_url: ""
+db_password: ""
+GIT_HELM_REPO: "cyse7125-fall2022-group04/helm-chart"
+git_repo_todo_webapp: "https://github.com/cyse7125-fall2022-group04/webapp.git"
+jenkins_file_todo_webapp: "Jenkinsfile"
+git_repo_elastic_webapp: "https://github.com/cyse7125-fall2022-group04/elastic-app.git"
+jenkins_file_elastic_webapp: "Jenkinsfile"
+docker_elastic_app_repo: "csye7125group04/elastic-kafka-app"
+jenkins_plugins:
+  - build-timeout
+  - cloudbees-folder
+  - command-launcher
+  - credentials
+  - credentials-binding
+  - git
+  - git-client
+  - git-server
+  - github
+  - github-api
+  - github-branch-source
+  - jdk-tool
+  - nodejs
+  - pipeline-build-step
+  - pipeline-github-lib
+  - pipeline-graph-analysis
+  - pipeline-input-step
+  - pipeline-milestone-step
+  - pipeline-model-api
+  - pipeline-model-definition
+  - pipeline-model-extensions
+  - pipeline-rest-api
+  - pipeline-stage-step
+  - pipeline-stage-tags-metadata
+  - pipeline-stage-view
+  - plain-credentials
+  - plugin-util-api
+  - scm-api
+  - script-security
+  - ssh-credentials
+  - ssh-slaves
+  - sshd
+  - workflow-aggregator
+  - workflow-api
+  - workflow-basic-steps
+  - workflow-cps
+  - workflow-cps-global-lib
+  - workflow-durable-task-step
+  - workflow-job
+  - workflow-multibranch
+  - workflow-scm-step
+  - workflow-step-api
+  - workflow-support
+  - ws-cleanup
+  - docker-workflow
+  - pipeline-maven

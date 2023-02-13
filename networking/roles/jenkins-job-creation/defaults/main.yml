@@ -1,0 +1,7 @@
+---
+jenkins_user: "admin"
+jenkins_pwd: ""
+jenkins_git_cred_id: ""
+git_repo: ""
+jenkins_file: ""
+job_name: ""
